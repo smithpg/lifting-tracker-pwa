@@ -1,5 +1,5 @@
 // Service worker: works offline, picks up new versions when online.
-const VERSION = "4e2179d222";
+const VERSION = "fd805f3bc4";
 const CORE = "core-" + VERSION, RUNTIME = "runtime-" + VERSION;
 const ASSETS = ["./", "./index.html", "./manifest.webmanifest", "./icons/icon-192.png", "./icons/icon-512.png", "./icons/apple-touch-icon.png"];
 self.addEventListener("install", e => { e.waitUntil(caches.open(CORE).then(c => c.addAll(ASSETS)).then(() => self.skipWaiting())); });

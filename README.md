@@ -17,7 +17,7 @@ Open https://smithpg.github.io/lifting-tracker-pwa/ and then:
 ```sh
 pip install pillow
 python3 source/build_pwa.py source/index.html /tmp/out
-rsync -a --exclude README.md /tmp/out/lifting/ ./
+cp /tmp/out/lifting/{index.html,sw.js,manifest.webmanifest} . && cp /tmp/out/lifting/icons/* icons/
 ```
 Each build stamps a new version into `sw.js`, so installed copies update the next time they open online.
 
