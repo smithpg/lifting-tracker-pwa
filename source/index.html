@@ -12,7 +12,7 @@
   /* Layout: one-column training logbook; sticky tab bar; each set is a tappable strip with its plate load beside it. */
   --bg:#e7eaed; --surface:#f8f9fa; --ink:#14171b; --muted:#59626d; --line:#cbd2d9; --soft:#dde2e7;
   --accent:#b3261e; --accent-ink:#ffffff;
-  --good:#1d7444; --warn:#985800;
+  --good:#1d7444; --warn:#985800; --merry:#12943f; --merry-ink:#ffffff;
   --display:'Barlow Condensed','Arial Narrow',sans-serif;
   --body:'IBM Plex Sans',system-ui,-apple-system,'Segoe UI',sans-serif;
   --mono:'IBM Plex Mono',ui-monospace,Menlo,Consolas,monospace;
@@ -22,13 +22,13 @@
 @media (prefers-color-scheme: dark){
   :root:not([data-theme="light"]){
     --bg:#101214; --surface:#191c20; --ink:#e6e9ec; --muted:#97a0aa; --line:#2c3137; --soft:#23272c;
-    --accent:#ff5d51; --accent-ink:#1c0503; --good:#4cc283; --warn:#e3a84a;
+    --accent:#ff5d51; --accent-ink:#1c0503; --good:#4cc283; --warn:#e3a84a; --merry:#3bd16f; --merry-ink:#062b12;
     color-scheme:dark;
   }
 }
 :root[data-theme="dark"]{
   --bg:#101214; --surface:#191c20; --ink:#e6e9ec; --muted:#97a0aa; --line:#2c3137; --soft:#23272c;
-  --accent:#ff5d51; --accent-ink:#1c0503; --good:#4cc283; --warn:#e3a84a;
+  --accent:#ff5d51; --accent-ink:#1c0503; --good:#4cc283; --warn:#e3a84a; --merry:#3bd16f; --merry-ink:#062b12;
   color-scheme:dark;
 }
 *{box-sizing:border-box}
@@ -88,6 +88,19 @@ main{max-width:780px;margin:0 auto;padding:16px max(16px,env(safe-area-inset-rig
 .inline-input{width:84px;padding:6px 8px;border:1px solid var(--line);border-radius:4px;background:var(--surface);font-family:var(--mono)}
 
 .timer{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+.head-r{display:flex;align-items:center;gap:8px;flex-wrap:wrap;justify-content:flex-end;margin-left:auto}
+.rest-slot{display:inline-flex;align-items:center;gap:0}
+.rest-slot:empty{display:none}
+.rest{font-family:var(--mono);font-size:14px;font-weight:600;font-variant-numeric:tabular-nums;padding:3px 10px 3px 8px;border-radius:999px;border:1.5px solid var(--ink);background:var(--surface);color:var(--ink);cursor:pointer;display:inline-flex;align-items:center;gap:6px;min-width:64px;justify-content:center;line-height:1.3}
+.rest::before{content:"";width:7px;height:7px;border-radius:50%;background:currentColor;animation:restblink 1s steps(2,start) infinite}
+.rest.ok{background:var(--merry);border-color:var(--merry);color:var(--merry-ink)}
+.rest.stopped{opacity:.55}
+.rest.stopped::before{border-radius:1px;animation:none}
+.rest-x{border:none;background:none;color:var(--muted);font-size:17px;line-height:1;cursor:pointer;padding:4px 2px 4px 5px}
+.rest-x:hover{color:var(--accent)}
+@keyframes restblink{to{opacity:.25}}
+.last{font-family:var(--mono);font-size:11.5px;line-height:1.4;color:var(--muted);font-variant-numeric:tabular-nums}
+.last b{font-weight:600;color:var(--ink);opacity:.75}
 .timer .clock{font-family:var(--mono);font-size:24px;font-weight:600;min-width:7ch}
 .meter{flex:1;min-width:120px;height:8px;background:var(--soft);border-radius:4px;overflow:hidden}
 .meter > i{display:block;height:100%;background:var(--ink)}
@@ -462,7 +475,7 @@ const goalText = ex => ex.mode === "sets" ? (+ex.sets) + "×" + (+ex.reps) : ex.
 function fmtSets(sets){
   const out = [];
   (sets || []).forEach(t => { const last = out[out.length - 1]; if (last && last.w === t.weight && last.r === t.reps) last.n++; else out.push({ w: t.weight, r: t.reps, n: 1 }); });
-  return out.map(o => o.n + "×" + o.r + " @ " + (o.w == null ? "BW" : fmtW(o.w))).join(" · ");
+  return out.map(o => o.n + "×" + o.r + (o.w == null ? "" : " @ " + fmtW(o.w))).join(" · ");
 }
 let draftSaveT = null;
 function saveDraft(dayId){ const k = draftKey(dayId), d = S.drafts[k]; clearTimeout(draftSaveT); draftSaveT = setTimeout(() => S.backend.saveDraft(k, d), 250); }
@@ -512,6 +525,90 @@ function setRow(kind, i, set, st, opts){
     (opts.noReps ? '<span></span>' : '<input class="reps" type="number" inputmode="numeric" min="0" id="' + kind + "-reps-" + i + '" data-f="' + kind + '-reps" data-i="' + i + '" value="' + esc(val) + '" placeholder="' + placeholder + '" aria-label="Reps done">') +
     '<div class="plates">' + plateLine(set.load) + "</div></div>";
 }
+/* ---------- Rest stopwatch: one per section, shown once a set there is ticked ---------- */
+const REST_MAX = 300, REST_HIDE_AFTER = 15 * 60;              // stops at 5:00, disappears 15 min after the last tick
+const restMin = sec => sec === "main" ? 90 : 60;
+const fmtRest = sec => { sec = Math.floor(sec); return Math.floor(sec / 60) + ":" + String(sec % 60).padStart(2, "0"); };
+function restState(d, sec){
+  const t = d && d.rest && d.rest[sec]; if (!t) return null;
+  const raw = (Date.now() - t) / 1000; if (raw > REST_HIDE_AFTER || raw < 0) return null;
+  const el = Math.min(REST_MAX, raw);
+  return { el, ok: el >= restMin(sec), stopped: raw >= REST_MAX };
+}
+function restInner(d, sec){
+  const r = restState(d, sec); if (!r) return "";
+  return '<button class="rest' + (r.ok ? " ok" : "") + (r.stopped ? " stopped" : "") + '" data-act="rest-restart" data-sec="' + sec + '" aria-label="Rest timer. Green at ' + fmtRest(restMin(sec)) + '. Tap to restart."><span class="rest-t">' + fmtRest(r.el) + "</span></button>" +
+    '<button class="rest-x" data-act="rest-hide" data-sec="' + sec + '" aria-label="Hide rest timer">×</button>';
+}
+const restSlot = (d, sec) => '<span class="rest-slot" data-sec="' + sec + '">' + restInner(d, sec) + "</span>";
+function startRest(d, sec){ d.rest = d.rest || {}; d.rest[sec] = Date.now(); }
+function buzz(){ try { if (navigator.vibrate) navigator.vibrate([120, 80, 120]); } catch (e) {} }
+let wakeLock = null, wakeBusy = false, wakeBlocked = false;
+async function updateWakeLock(anyRunning){
+  if (wakeBusy || !("wakeLock" in navigator)) return;
+  wakeBusy = true;
+  try {
+    if (anyRunning && !wakeLock && !wakeBlocked && document.visibilityState === "visible"){
+      wakeLock = await navigator.wakeLock.request("screen");
+      wakeLock.addEventListener("release", () => { wakeLock = null; });
+    } else if (!anyRunning && wakeLock){ const w = wakeLock; wakeLock = null; await w.release(); }
+  } catch (e){ wakeLock = null; wakeBlocked = true; }
+  wakeBusy = false;
+}
+document.addEventListener("visibilitychange", () => { if (document.visibilityState === "visible") wakeBlocked = false; });
+function tickRest(){
+  let anyRunning = false;
+  if (S.ui.view === "today" && S.ui.day && S.settings){
+    const d = S.drafts[draftKey(S.ui.day)];
+    document.querySelectorAll(".rest-slot").forEach(slot => {
+      const sec = slot.dataset.sec, r = restState(d, sec);
+      if (!r){ if (slot.innerHTML) slot.innerHTML = ""; return; }
+      let b = slot.querySelector(".rest");
+      if (!b){ slot.innerHTML = restInner(d, sec); return; }
+      const wasOk = b.classList.contains("ok");
+      b.querySelector(".rest-t").textContent = fmtRest(r.el);
+      b.classList.toggle("ok", r.ok); b.classList.toggle("stopped", r.stopped);
+      if (r.ok && !wasOk && !r.stopped) buzz();
+      if (!r.stopped) anyRunning = true;
+    });
+  }
+  updateWakeLock(anyRunning);
+}
+
+/* ---------- What you did last time ---------- */
+const normName = n => String(n || "").trim().toLowerCase();
+const shortDate = iso => new Date(iso).toLocaleDateString(undefined, { month: "short", day: "numeric" });
+function lastMain(lift){
+  const ss = S.sessions.find(x => x.lift === lift && (x.main || []).some(m => m.reps != null)); if (!ss) return "";
+  return '<div class="last"><b>Last</b> ' + shortDate(ss.date) + (ss.week === 7 ? " 7th wk" : " W" + ss.week) + ": " +
+    ss.main.filter(m => m.reps != null).map(m => fmtW(m.weight) + "×" + m.reps + (m.plus ? "+" : "")).join(" · ") + "</div>";
+}
+function lastBbb(lift){
+  for (const ss of S.sessions){
+    if (ss.lift !== lift) continue;
+    if (ss.bbb && ss.bbb.sets.length) return '<div class="last"><b>Last</b> ' + shortDate(ss.date) + ": " + fmtSets(ss.bbb.sets) + (ss.suppSeconds ? " in " + mmss(ss.suppSeconds) : "") + "</div>";
+    const old = (ss.supp || []).find(x => normName(x.name) === normName(LIFTS[lift].name) && x.setsDone);
+    if (old) return '<div class="last"><b>Last</b> ' + shortDate(ss.date) + ": " + old.setsDone + "×" + old.reps + " @ " + fmtW(old.weight) + "</div>";
+  }
+  return "";
+}
+function lastExtra(name, lift){
+  const key = normName(name);
+  const pick = ss => {
+    for (const x of (ss.extras || [])) if (normName(x.name) === key && x.sets.length){
+      const tot = x.sets.reduce((a, t) => a + (t.reps || 0), 0);
+      return fmtSets(x.sets) + (x.sets.length > 1 ? " (" + tot + " reps)" : "");
+    }
+    for (const x of (ss.assist || [])) if (normName(x.name) === key && x.done) return x.done + " reps";
+    for (const x of (ss.supp || [])) if (normName(x.name) === key && x.setsDone) return x.setsDone + "×" + x.reps + (x.weight != null ? " @ " + fmtW(x.weight) : "");
+    return null;
+  };
+  for (const pass of [ss => ss.lift === lift, () => true]){
+    for (const ss of S.sessions){ if (!pass(ss)) continue; const t = pick(ss); if (t) return '<div class="last"><b>Last</b> ' + shortDate(ss.date) + (ss.lift !== lift ? " (" + LIFTS[ss.lift].short + " day)" : "") + ": " + t + "</div>"; }
+  }
+  return "";
+}
+
 function loggedSetRows(g, sets, def){
   if (!sets.length) return "";
   const gid = g.replace(":", "-");
@@ -561,22 +658,22 @@ function viewToday(){
   h += '<section class="card"><div class="lift-head"><h2>' + lift.name + '</h2><span class="tm">TM ' + fmtW(pl.tm) + " " + U() + " · " + esc(posLabel()) + "</span></div>" + prLine + "</section>";
 
   if (pl.warm.length){
-    h += '<section class="card"><div class="card-head"><h3>Warm-up</h3><span class="small muted">40 / 50 / 60%</span></div><div class="sets">' +
+    h += '<section class="card"><div class="card-head"><h3>Warm-up</h3><div class="head-r"><span class="small muted">40 / 50 / 60%</span>' + restSlot(d, "warm") + '</div></div><div class="sets">' +
       pl.warm.map((w, i) => setRow("warm", i, w, d.warm[i], { noReps: true })).join("") + "</div></section>";
   }
-  h += '<section class="card"><div class="card-head"><h3>Main work</h3><span class="small muted">' + (pl.deload ? WEEK_NAMES[7] : WEEK_NAMES[pl.week]) + "</span></div><div class=\"sets\">" +
+  h += '<section class="card"><div class="card-head"><h3>Main work</h3><div class="head-r"><span class="small muted">' + (pl.deload ? WEEK_NAMES[7] : WEEK_NAMES[pl.week]) + "</span>" + restSlot(d, "main") + "</div></div>" + lastMain(pl.lift) + "<div class=\"sets\">" +
     pl.main.map((m, i) => setRow("main", i, m, d.main[i])).join("") + "</div></section>";
 
   if (pl.bbb){
     const el = timerElapsed(d) / 1000, b = pl.bbb;
     const suppLabel = s.supp === "fsl" ? "FSL " + pctTxt(b.pct) : pctTxt(b.pct) + " of TM";
-    h += '<section class="card"><div class="card-head"><h3>Boring But Big</h3><span class="small muted">5×10 · ' + suppLabel + "</span></div>" +
+    h += '<section class="card"><div class="card-head"><h3>Boring But Big</h3><div class="head-r"><span class="small muted">5×10 · ' + suppLabel + "</span>" + restSlot(d, "bbb") + "</div></div>" +
       '<div class="timer"><span class="clock" id="timer-display">' + mmss(el) + '</span><span class="small muted">/ 20:00</span>' +
       '<div class="meter' + (el > SUPP_GOAL_SEC ? " over" : "") + '" id="timer-meter"><i style="width:' + Math.min(100, el / SUPP_GOAL_SEC * 100) + '%"></i></div>' +
       (d.timer.start ? '<button class="btn sm" data-act="timer-pause">Pause</button>' : '<button class="btn sm" data-act="timer-start">' + (d.timer.acc ? "Resume" : "Start") + "</button>") +
       '<button class="btn sm" data-act="timer-reset">Reset</button></div>' +
       '<p class="small muted" style="margin:0">Aim for about 20 minutes, counting rows on days that have them. The clock starts when you tick your first set.</p>' +
-      '<div class="bbb-target"><span class="w">' + fmtW(b.load.total) + '</span><span class="muted">' + U() + " × 10 · " + esc(b.name) + '</span></div><div class="plates small muted mono">' + plateLine(b.load) + "</div>" +
+      '<div class="bbb-target"><span class="w">' + fmtW(b.load.total) + '</span><span class="muted">' + U() + " × 10 · " + esc(b.name) + '</span></div><div class="plates small muted mono">' + plateLine(b.load) + "</div>" + lastBbb(pl.lift) +
       loggedSetRows("bbb", d.bbb, { w: b.load.total, r: 10 }) +
       '<div class="btns"><button class="btn sm" data-act="ls-add" data-g="bbb">Add set</button></div></section>';
   }
@@ -589,8 +686,8 @@ function viewToday(){
     const g = "ex:" + ex.id, sets = exSets(d, ex), def = { w: lastWeightFor(ex.name), r: ex.mode === "sets" ? +ex.reps : null };
     const pr = exProgress(ex, sets, def), adhoc = d.adhoc.some(x => x.id === ex.id);
     h += '<div class="ex" data-g="' + g + '"><div class="ex-head"><div><strong>' + esc(ex.name) + "</strong> " + (goalText(ex) ? '<span class="small muted mono">' + goalText(ex) + "</span>" : "") +
-      (ex.optional ? ' <span class="tag">optional</span>' : "") + (adhoc ? ' <span class="tag">today only</span>' : "") + '</div><div class="count">' + pr.text + "</div></div>" +
-      (pr.goal ? meter(pr.cur, pr.goal) : "") + loggedSetRows(g, sets, def) +
+      (ex.optional ? ' <span class="tag">optional</span>' : "") + (adhoc ? ' <span class="tag">today only</span>' : "") + '</div><div class="head-r"><span class="count">' + pr.text + "</span>" + restSlot(d, g) + "</div></div>" +
+      lastExtra(ex.name, pl.lift) + (pr.goal ? meter(pr.cur, pr.goal) : "") + loggedSetRows(g, sets, def) +
       '<div class="btns"><button class="btn sm" data-act="ls-add" data-g="' + g + '">Add set</button>' +
       (ex.mode === "total" ? [5, 10, 15, 25].map(n => '<button class="btn sm" data-act="ls-quick" data-g="' + g + '" data-n="' + n + '">+' + n + " reps</button>").join("") : "") +
       (adhoc ? '<button class="btn sm danger" data-act="adhoc-del" data-id="' + ex.id + '">Remove</button>' : "") + "</div></div>";
@@ -885,18 +982,21 @@ document.addEventListener("click", async e => {
     case "pick-day": S.ui.day = el.dataset.day; S.ui.confirm = null; render(); break;
     case "toggle-warm": case "toggle-main": {
       const kind = act === "toggle-warm" ? "warm" : "main"; const d = getDraft(dayId);
-      d[kind][i] = d[kind][i] || {}; d[kind][i].done = !d[kind][i].done; saveDraft(dayId); render(); break; }
+      d[kind][i] = d[kind][i] || {}; d[kind][i].done = !d[kind][i].done; if (d[kind][i].done) startRest(d, kind); saveDraft(dayId); render(); break; }
     case "ls-toggle": {
       const gi = groupInfo(el.dataset.g), st = gi.sets[i]; if (!st) break;
       st.done = !st.done;
       if (st.done && el.dataset.g === "bbb" && !gi.d.timer.start && !gi.d.timer.acc) gi.d.timer.start = Date.now();
+      if (st.done) startRest(gi.d, el.dataset.g);
       saveDraft(dayId); render(); break; }
     case "ls-del": { const gi = groupInfo(el.dataset.g); gi.sets.splice(i, 1); saveDraft(dayId); render(); break; }
     case "ls-add": case "ls-quick": {
       const gi = groupInfo(el.dataset.g), prev = gi.sets[gi.sets.length - 1];
-      if (act === "ls-quick") gi.sets.push({ w: prev ? prev.w : null, r: +el.dataset.n, done: true });
+      if (act === "ls-quick"){ gi.sets.push({ w: prev ? prev.w : null, r: +el.dataset.n, done: true }); startRest(gi.d, el.dataset.g); }
       else gi.sets.push({ w: prev ? prev.w : null, r: prev ? prev.r : null, done: false });
       saveDraft(dayId); render(); break; }
+    case "rest-restart": { const d = getDraft(dayId); startRest(d, el.dataset.sec); saveDraft(dayId); tickRest(); break; }
+    case "rest-hide": { const d = getDraft(dayId); if (d.rest) delete d.rest[el.dataset.sec]; saveDraft(dayId); tickRest(); break; }
     case "adhoc-add": {
       const name = ($("#adhoc-name").value || "").trim(); if (!name){ toast("Type the exercise name first."); $("#adhoc-name").focus(); break; }
       const keep = $("#adhoc-keep").checked, d = getDraft(dayId);
@@ -962,13 +1062,16 @@ document.addEventListener("input", e => {
   const el = e.target, f = el.dataset && el.dataset.f; if (!f) return;
   const i = +el.dataset.i, dayId = S.ui.day;
   if (f === "main-reps"){
-    const d = getDraft(dayId); d.main[i] = d.main[i] || {}; d.main[i].reps = el.value === "" ? null : el.value; if (el.value !== "") d.main[i].done = true; saveDraft(dayId);
+    const d = getDraft(dayId); d.main[i] = d.main[i] || {}; const was = !!d.main[i].done;
+    d.main[i].reps = el.value === "" ? null : el.value; if (el.value !== "") d.main[i].done = true;
+    if (!was && d.main[i].done){ startRest(d, "main"); tickRest(); }
+    saveDraft(dayId);
     const row = el.closest(".set"); if (row){ row.classList.toggle("is-done", !!d.main[i].done); row.querySelector(".tick").setAttribute("aria-pressed", String(!!d.main[i].done)); }
   }
   else if (f === "ls-w" || f === "ls-r"){
     const g = el.dataset.g, gi = groupInfo(g), st = gi.sets[i]; if (!st) return;
     if (f === "ls-w") st.w = el.value === "" ? null : el.value;
-    else { st.r = el.value === "" ? null : el.value; if (el.value !== "") st.done = true; }
+    else { const was = !!st.done; st.r = el.value === "" ? null : el.value; if (el.value !== "") st.done = true; if (!was && st.done){ startRest(gi.d, g); tickRest(); } }
     saveDraft(dayId);
     const row = el.closest(".lset"); if (row){ row.classList.toggle("is-done", !!st.done); row.querySelector(".tick").setAttribute("aria-pressed", String(!!st.done)); }
     if (gi.ex){
@@ -1026,6 +1129,7 @@ document.addEventListener("change", async e => {
   else if (f === "import-file"){ const file = el.files && el.files[0]; if (file){ $("#import-box").value = await file.text(); } }
 });
 
+setInterval(tickRest, 500);
 setInterval(() => {
   const el = $("#timer-display"); if (!el || S.ui.view !== "today") return;
   const d = S.drafts[draftKey(S.ui.day)]; if (!d) return;
