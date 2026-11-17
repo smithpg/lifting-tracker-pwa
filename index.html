@@ -549,7 +549,14 @@ function restInner(d, sec){
     '<button class="rest-x" data-act="rest-hide" data-sec="' + sec + '" aria-label="Hide rest timer">×</button>';
 }
 const restSlot = (d, sec) => '<span class="rest-slot" data-sec="' + sec + '">' + restInner(d, sec) + "</span>";
-function startRest(d, sec){ d.rest = d.rest || {}; d.rest[sec] = Date.now(); }
+// Warm-up, main work and BBB share one stopwatch: starting any stopwatch clears theirs.
+// Supplemental exercises keep their own side by side (for alternating exercises).
+const isSuppSec = sec => sec.startsWith("ex:");
+function startRest(d, sec){
+  d.rest = d.rest || {};
+  Object.keys(d.rest).forEach(k => { if (k !== sec && !(isSuppSec(sec) && isSuppSec(k))) delete d.rest[k]; });
+  d.rest[sec] = Date.now();
+}
 function buzz(){ try { if (navigator.vibrate) navigator.vibrate([120, 80, 120]); } catch (e) {} }
 let wakeLock = null, wakeBusy = false, wakeBlocked = false;
 async function updateWakeLock(anyRunning){
@@ -589,7 +596,7 @@ const shortDate = iso => new Date(iso).toLocaleDateString(undefined, { month: "s
 function lastMain(lift){
   const ss = S.sessions.find(x => x.lift === lift && (x.main || []).some(m => m.reps != null)); if (!ss) return "";
   return '<div class="last"><b>Last</b> ' + shortDate(ss.date) + (ss.week === 7 ? " 7th wk" : " W" + ss.week) + ": " +
-    ss.main.filter(m => m.reps != null).map(m => fmtW(m.weight) + "×" + m.reps + (m.plus ? "+" : "")).join(" · ") + "</div>";
+    ss.main.map(m => fmtW(m.weight) + "×" + (m.reps != null ? m.reps : "?") + (m.plus ? "+" : "")).join(" · ") + "</div>";
 }
 function lastBbb(lift){
   for (const ss of S.sessions){
@@ -710,7 +717,7 @@ function viewToday(){
     '<p class="small muted" style="margin:0">Easy enough that it helps recovery rather than eating into it.</p>' +
     '<div class="field"><label for="notes">Notes</label><textarea id="notes" data-f="notes" placeholder="Bar speed, sleep, bodyweight, anything">' + esc(d.notes) + "</textarea></div></section>";
 
-  h += '<div class="actions"><button class="btn primary" data-act="log">Log ' + LIFTS[pl.lift].short + " session</button>" +
+  h += '<div class="actions"><button class="btn primary" data-act="log">' + (S.ui.confirm === "log" ? "Log without + reps" : "Log " + LIFTS[pl.lift].short + " session") + "</button>" +
     '<button class="btn" data-act="skip">' + (S.ui.confirm === "skip" ? "Confirm skip" : "Skip this day") + "</button></div>";
   return h;
 }
@@ -819,7 +826,9 @@ function viewHistory(){
     h += '<details class="sess"' + (S.ui.openSess[x.id] ? " open" : "") + ' data-sess="' + x.id + '"><summary><span><strong>' + LIFTS[x.lift].name + '</strong> <span class="small muted mono">C' + x.cycle + (x.week === 7 ? " 7th wk" : " W" + x.week) + "</span></span>" +
       '<span class="mono small">' + (top ? fmtW(top.w) + "×" + top.r + " → " + fmtW(top.e) : "") + (hit === false ? ' <span class="tag bad">missed min</span>' : "") +
       ' <span class="muted">' + date.toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" }) + "</span></span></summary>" +
-      '<div class="body"><div class="mono small">' + (x.main || []).map(m => fmtW(m.weight) + "×" + (m.reps != null ? m.reps : "–") + (m.plus ? "+" : "")).join(" · ") + "</div>" +
+      '<div class="body"><div class="mono small">' + (x.main || []).map((m, mi) => fmtW(m.weight) + "×" + (m.reps != null ? m.reps
+        : '<input class="inline-input" style="width:60px;padding:2px 6px" type="number" inputmode="numeric" min="0" id="hr-' + x.id + "-" + mi + '" data-f="hist-reps" data-id="' + x.id + '" data-i="' + mi + '" placeholder="?" aria-label="Reps for ' + fmtW(m.weight) + ' set">') + (m.plus ? "+" : "")).join(" · ") + "</div>" +
+      ((x.main || []).some(m => m.reps == null) ? '<div class="small muted">Some sets have no reps. Fill them in if you remember them; the + set counts toward your estimated max.</div>' : "") +
       (x.bbb && x.bbb.sets.length ? '<div class="small"><strong>5×10</strong> <span class="mono">' + fmtSets(x.bbb.sets) + "</span>" + (x.suppSeconds ? ' <span class="muted">in ' + mmss(x.suppSeconds) + "</span>" : "") + "</div>" : "") +
       (x.extras || []).filter(e => e.sets.length).map(e => '<div class="small"><strong>' + esc(e.name) + '</strong> <span class="mono">' + fmtSets(e.sets) + '</span> <span class="muted">(' + e.sets.reduce((a, t) => a + (t.reps || 0), 0) + " reps)</span></div>").join("") +
       (suppDone ? '<div class="small">' + esc(suppDone) + (x.suppSeconds ? " · " + mmss(x.suppSeconds) : "") + "</div>" : "") +
@@ -990,7 +999,9 @@ document.addEventListener("click", async e => {
     case "pick-day": S.ui.day = el.dataset.day; S.ui.confirm = null; render(); break;
     case "toggle-warm": case "toggle-main": {
       const kind = act === "toggle-warm" ? "warm" : "main"; const d = getDraft(dayId);
-      d[kind][i] = d[kind][i] || {}; d[kind][i].done = !d[kind][i].done; if (d[kind][i].done) startRest(d, kind); saveDraft(dayId); render(); break; }
+      d[kind][i] = d[kind][i] || {}; d[kind][i].done = !d[kind][i].done; if (d[kind][i].done) startRest(d, kind); saveDraft(dayId); render();
+      if (kind === "main" && d.main[i].done && num(d.main[i].reps) == null){ const m = plan(dayId).main[i]; if (m && (m.plus || m.test)){ const inp = $("#main-reps-" + i); if (inp) inp.focus(); } }
+      break; }
     case "ls-toggle": {
       const gi = groupInfo(el.dataset.g), st = gi.sets[i]; if (!st) break;
       st.done = !st.done;
@@ -1027,7 +1038,13 @@ document.addEventListener("click", async e => {
     case "timer-start": { const d = getDraft(dayId); d.timer.start = Date.now(); saveDraft(dayId); render(); break; }
     case "timer-pause": { const d = getDraft(dayId); d.timer.acc = timerElapsed(d); d.timer.start = null; saveDraft(dayId); render(); break; }
     case "timer-reset": { const d = getDraft(dayId); d.timer = { start: null, acc: 0 }; saveDraft(dayId); render(); break; }
-    case "log": await logSession(); break;
+    case "log": {
+      const d = getDraft(dayId), missing = plan(dayId).main.findIndex((m, k) => (m.plus || m.test) && num((d.main[k] || {}).reps) == null);
+      if (missing >= 0 && S.ui.confirm !== "log"){
+        armConfirm("log"); toast("No reps on the " + plan(dayId).main[missing].reps + "+ set. Enter them, or tap again to log without.");
+        const inp = $("#main-reps-" + missing); if (inp) inp.focus(); break;
+      }
+      S.ui.confirm = null; await logSession(); break; }
     case "skip":
       if (S.ui.confirm !== "skip"){ armConfirm("skip"); break; }
       S.ui.confirm = null; completeDay(dayId); await saveProgram(); S.ui.day = null; toast("Skipped " + dayOf(dayId).dow + "."); render(); break;
@@ -1134,6 +1151,12 @@ document.addEventListener("change", async e => {
   }
   else if (f === "pos-cycle"){ const v = Math.max(1, Math.floor(num(el.value) || 1)); S.program.cycle = v; await saveProgram(); render(); }
   else if (f === "pos-week"){ S.program.week = +el.value; S.program.done = {}; await saveProgram(); render(); }
+  else if (f === "hist-reps"){
+    const v = num(el.value), ss = S.sessions.find(x => x.id === el.dataset.id); if (!ss || v == null || v < 0) return;
+    const m = ss.main[+el.dataset.i]; m.reps = Math.floor(v); m.done = true;
+    await S.backend.saveSession(ss); S.sessions = await S.backend.listSessions(); S.ui.openSess[ss.id] = true;
+    toast("Saved " + fmtW(m.weight) + "×" + m.reps + "."); render();
+  }
   else if (f === "import-file"){ const file = el.files && el.files[0]; if (file){ $("#import-box").value = await file.text(); } }
 });
 
